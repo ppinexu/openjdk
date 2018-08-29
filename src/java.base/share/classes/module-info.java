@@ -284,8 +284,6 @@ module java.base {
         java.naming;
     exports sun.security.rsa to
         jdk.crypto.cryptoki;
-    exports sun.security.ssl to
-        java.security.jgss;
     exports sun.security.timestamp to
         jdk.jartool;
     exports sun.security.tools to
@@ -304,9 +302,9 @@ module java.base {
         jdk.security.auth,
         jdk.security.jgss;
     exports sun.security.util.math to
-        jdk.crypto.ec
+        jdk.crypto.ec;
     exports sun.security.util.math.intpoly to
-        jdk.crypto.ec
+        jdk.crypto.ec;
     exports sun.security.x509 to
         jdk.crypto.ec,
         jdk.crypto.cryptoki,
@@ -360,7 +358,6 @@ module java.base {
     // JDK-internal service types
 
     uses jdk.internal.logger.DefaultLoggerFinder;
-    uses sun.security.ssl.ClientKeyExchangeService;
     uses sun.text.spi.JavaTimeDateTimePatternProvider;
     uses sun.util.spi.CalendarProvider;
     uses sun.util.locale.provider.LocaleDataMetaInfo;

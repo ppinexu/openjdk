@@ -24,7 +24,7 @@
 /*
  * @test ReservedStackTest
  *
- * @requires vm.opt.DeoptimizeAlot == null | vm.opt.DeoptimizeAlot == false
+ * @requires vm.opt.DeoptimizeALot != true
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
  * @modules java.base/jdk.internal.vm.annotation

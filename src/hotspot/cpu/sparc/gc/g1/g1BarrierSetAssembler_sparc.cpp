@@ -28,6 +28,7 @@
 #include "gc/g1/g1BarrierSetAssembler.hpp"
 #include "gc/g1/g1BarrierSetRuntime.hpp"
 #include "gc/g1/g1CardTable.hpp"
+#include "gc/g1/g1SATBMarkQueueSet.hpp"
 #include "gc/g1/g1ThreadLocalData.hpp"
 #include "gc/g1/heapRegion.hpp"
 #include "interpreter/interp_masm.hpp"
@@ -160,7 +161,7 @@ static void generate_satb_log_enqueue(bool with_frame) {
 
   address handle_zero =
     CAST_FROM_FN_PTR(address,
-                     &SATBMarkQueueSet::handle_zero_index_for_thread);
+                     &G1SATBMarkQueueSet::handle_zero_index_for_thread);
   // This should be rare enough that we can afford to save all the
   // scratch registers that the calling context might be using.
   __ mov(G1_scratch, L0);
@@ -400,9 +401,10 @@ void G1BarrierSetAssembler::g1_write_barrier_post(MacroAssembler* masm, Register
 void G1BarrierSetAssembler::oop_store_at(MacroAssembler* masm, DecoratorSet decorators, BasicType type,
                                          Register val, Address dst, Register tmp) {
   bool in_heap = (decorators & IN_HEAP) != 0;
-  bool in_concurrent_root = (decorators & IN_CONCURRENT_ROOT) != 0;
+  bool as_normal = (decorators & AS_NORMAL) != 0;
+  assert((decorators & IS_DEST_UNINITIALIZED) == 0, "unsupported");
 
-  bool needs_pre_barrier = in_heap || in_concurrent_root;
+  bool needs_pre_barrier = as_normal;
   // No need for post barrier if storing NULL
   bool needs_post_barrier = val != G0 && in_heap;
 
@@ -605,8 +607,8 @@ void G1BarrierSetAssembler::generate_c1_pre_barrier_runtime_stub(StubAssembler* 
 
   __ call_VM_leaf(L7_thread_cache,
                   CAST_FROM_FN_PTR(address,
-                                   SATBMarkQueueSet::handle_zero_index_for_thread),
-                                   G2_thread);
+                                   G1SATBMarkQueueSet::handle_zero_index_for_thread),
+                  G2_thread);
 
   __ restore_live_registers(true);
 
@@ -693,7 +695,7 @@ void G1BarrierSetAssembler::generate_c1_post_barrier_runtime_stub(StubAssembler*
   __ call_VM_leaf(L7_thread_cache,
                   CAST_FROM_FN_PTR(address,
                                    DirtyCardQueueSet::handle_zero_index_for_thread),
-                                   G2_thread);
+                  G2_thread);
 
   __ restore_live_registers(true);
 

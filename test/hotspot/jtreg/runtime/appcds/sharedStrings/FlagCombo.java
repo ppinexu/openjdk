@@ -22,10 +22,10 @@
  *
  */
 
-/*
+/**
  * @test
  * @summary Test relevant combinations of command line flags with shared strings
- * @requires vm.cds.archived.java.heap
+ * @requires vm.cds.archived.java.heap & vm.hasJFR
  * @library /test/lib /test/hotspot/jtreg/runtime/appcds
  * @modules java.base/jdk.internal.misc
  * @modules java.management
@@ -34,19 +34,35 @@
  * @run main FlagCombo
  */
 
+/**
+ * @test
+ * @summary Test relevant combinations of command line flags with shared strings
+ * @comment A special test excluding the case that requires JFR
+ * @requires vm.cds.archived.java.heap & !vm.hasJFR
+ * @library /test/lib /test/hotspot/jtreg/runtime/appcds
+ * @modules java.base/jdk.internal.misc
+ * @modules java.management
+ *          jdk.jartool/sun.tools.jar
+ * @build HelloString
+ * @run main FlagCombo noJfr
+ */
+
 import jdk.test.lib.BuildHelper;
+import jdk.test.lib.Platform;
 
 public class FlagCombo {
     public static void main(String[] args) throws Exception {
         SharedStringsUtils.buildJar("HelloString");
 
         SharedStringsUtils.dump(TestCommon.list("HelloString"),
-            "SharedStringsBasic.txt");
+            "SharedStringsBasic.txt", "-Xlog:cds,cds+hashtables");
 
         SharedStringsUtils.runWithArchive("HelloString", "-XX:+UseG1GC");
 
-        SharedStringsUtils.runWithArchiveAuto("HelloString",
-           "-XX:StartFlightRecording=dumponexit=true");
+        if (args.length == 0) {
+            SharedStringsUtils.runWithArchiveAuto("HelloString",
+                "-XX:StartFlightRecording=dumponexit=true");
+        }
 
         SharedStringsUtils.runWithArchive("HelloString", "-XX:+UnlockDiagnosticVMOptions",
            "-XX:NativeMemoryTracking=detail", "-XX:+PrintNMTStatistics");

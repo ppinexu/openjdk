@@ -104,10 +104,10 @@ ReferenceProcessor::ReferenceProcessor(BoolObjectClosure* is_subject_to_discover
   _is_subject_to_discovery(is_subject_to_discovery),
   _discovering_refs(false),
   _enqueuing_is_done(false),
-  _is_alive_non_header(is_alive_non_header),
   _processing_is_mt(mt_processing),
   _next_id(0),
-  _adjust_no_of_processing_threads(adjust_no_of_processing_threads)
+  _adjust_no_of_processing_threads(adjust_no_of_processing_threads),
+  _is_alive_non_header(is_alive_non_header)
 {
   assert(is_subject_to_discovery != NULL, "must be set");
 
@@ -1033,7 +1033,7 @@ ReferenceProcessor::add_to_discovered_list_mt(DiscoveredList& refs_list,
   // The last ref must have its discovered field pointing to itself.
   oop next_discovered = (current_head != NULL) ? current_head : obj;
 
-  oop retest = RawAccess<>::oop_atomic_cmpxchg(next_discovered, discovered_addr, oop(NULL));
+  oop retest = HeapAccess<AS_NO_KEEPALIVE>::oop_atomic_cmpxchg(next_discovered, discovered_addr, oop(NULL));
 
   if (retest == NULL) {
     // This thread just won the right to enqueue the object.

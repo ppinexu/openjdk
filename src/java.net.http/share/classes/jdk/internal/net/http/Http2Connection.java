@@ -297,7 +297,7 @@ class Http2Connection  {
         this.framesDecoder = new FramesDecoder(this::processFrame,
                 clientSettings.getParameter(SettingsFrame.MAX_FRAME_SIZE));
         // serverSettings will be updated by server
-        this.serverSettings = SettingsFrame.getDefaultSettings();
+        this.serverSettings = SettingsFrame.defaultRFCSettings();
         this.hpackOut = new Encoder(serverSettings.getParameter(HEADER_TABLE_SIZE));
         this.hpackIn = new Decoder(clientSettings.getParameter(HEADER_TABLE_SIZE));
         if (debugHpack.on()) {
@@ -353,7 +353,8 @@ class Http2Connection  {
 
     // Requires TLS handshake. So, is really async
     static CompletableFuture<Http2Connection> createAsync(HttpRequestImpl request,
-                                                          Http2ClientImpl h2client) {
+                                                          Http2ClientImpl h2client,
+                                                          Exchange<?> exchange) {
         assert request.secure();
         AbstractAsyncSSLConnection connection = (AbstractAsyncSSLConnection)
         HttpConnection.getConnection(request.getAddress(),
@@ -361,7 +362,12 @@ class Http2Connection  {
                                      request,
                                      HttpClient.Version.HTTP_2);
 
-        return connection.connectAsync()
+        // Expose the underlying connection to the exchange's aborter so it can
+        // be closed if a timeout occurs.
+        exchange.connectionAborter.connection(connection);
+
+        return connection.connectAsync(exchange)
+                  .thenCompose(unused -> connection.finishConnect())
                   .thenCompose(unused -> checkSSLConfig(connection))
                   .thenCompose(notused-> {
                       CompletableFuture<Http2Connection> cf = new MinimalFuture<>();
@@ -430,12 +436,12 @@ class Http2Connection  {
 
         assert numReservedClientStreams >= 0;
         assert numReservedServerStreams >= 0;
-        if (clientInitiated && numReservedClientStreams >= getMaxConcurrentClientStreams()) {
+        if (clientInitiated &&numReservedClientStreams >= maxConcurrentClientInitiatedStreams()) {
             throw new IOException("too many concurrent streams");
         } else if (clientInitiated) {
             numReservedClientStreams++;
         }
-        if (!clientInitiated && numReservedServerStreams >= getMaxConcurrentServerStreams()) {
+        if (!clientInitiated && numReservedServerStreams >= maxConcurrentServerInitiatedStreams()) {
             return false;
         } else if (!clientInitiated) {
             numReservedServerStreams++;
@@ -580,11 +586,11 @@ class Http2Connection  {
         return serverSettings.getParameter(INITIAL_WINDOW_SIZE);
     }
 
-    final int getMaxConcurrentClientStreams() {
+    final int maxConcurrentClientInitiatedStreams() {
         return serverSettings.getParameter(MAX_CONCURRENT_STREAMS);
     }
 
-    final int getMaxConcurrentServerStreams() {
+    final int maxConcurrentServerInitiatedStreams() {
         return clientSettings.getParameter(MAX_CONCURRENT_STREAMS);
     }
 
@@ -673,7 +679,11 @@ class Http2Connection  {
         client2.deleteConnection(this);
         List<Stream<?>> c = new LinkedList<>(streams.values());
         for (Stream<?> s : c) {
-            s.connectionClosing(t);
+            try {
+                s.connectionClosing(t);
+            } catch (Throwable e) {
+                Log.logError("Failed to close stream {0}: {1}", s.streamid, e);
+            }
         }
         connection.close();
     }
@@ -738,6 +748,9 @@ class Http2Connection  {
                 }
 
                 if (!(frame instanceof ResetFrame)) {
+                    if (frame instanceof DataFrame) {
+                        dropDataFrame((DataFrame)frame);
+                    }
                     if (isServerInitiatedStream(streamid)) {
                         if (streamid < nextPushStream) {
                             // trailing data on a cancelled push promise stream,
@@ -773,6 +786,27 @@ class Http2Connection  {
             } else {
                 stream.incoming(frame);
             }
+        }
+    }
+
+    final void dropDataFrame(DataFrame df) {
+        if (closed) return;
+        if (debug.on()) {
+            debug.log("Dropping data frame for stream %d (%d payload bytes)",
+                    df.streamid(), df.payloadLength());
+        }
+        ensureWindowUpdated(df);
+    }
+
+    final void ensureWindowUpdated(DataFrame df) {
+        try {
+            if (closed) return;
+            int length = df.payloadLength();
+            if (length > 0) {
+                windowUpdater.update(length);
+            }
+        } catch(Throwable t) {
+            Log.logError("Unexpected exception while updating window: {0}", (Object)t);
         }
     }
 
@@ -984,7 +1018,6 @@ class Http2Connection  {
                      connection.channel().getLocalAddress(),
                      connection.address());
         SettingsFrame sf = new SettingsFrame(clientSettings);
-        int initialWindowSize = sf.getParameter(INITIAL_WINDOW_SIZE);
         ByteBuffer buf = framesEncoder.encodeConnectionPreface(PREFACE_BYTES, sf);
         Log.logFrames(sf, "OUT");
         // send preface bytes and SettingsFrame together
@@ -997,9 +1030,20 @@ class Http2Connection  {
         Log.logTrace("Settings Frame sent");
 
         // send a Window update for the receive buffer we are using
-        // minus the initial 64 K specified in protocol
-        final int len = windowUpdater.initialWindowSize - initialWindowSize;
-        if (len > 0) {
+        // minus the initial 64 K -1 specified in protocol:
+        // RFC 7540, Section 6.9.2:
+        // "[...] the connection flow-control window is set to the default
+        // initial window size until a WINDOW_UPDATE frame is received."
+        //
+        // Note that the default initial window size, not to be confused
+        // with the initial window size, is defined by RFC 7540 as
+        // 64K -1.
+        final int len = windowUpdater.initialWindowSize - DEFAULT_INITIAL_WINDOW_SIZE;
+        if (len != 0) {
+            if (Log.channel()) {
+                Log.logChannel("Sending initial connection window update frame: {0} ({1} - {2})",
+                        len, windowUpdater.initialWindowSize, DEFAULT_INITIAL_WINDOW_SIZE);
+            }
             windowUpdater.sendWindowUpdate(len);
         }
         // there will be an ACK to the windows update - which should
@@ -1132,6 +1176,7 @@ class Http2Connection  {
 
     private Stream<?> registerNewStream(OutgoingHeaders<Stream<?>> oh) {
         Stream<?> stream = oh.getAttachment();
+        assert stream.streamid == 0;
         int streamid = nextstreamid;
         nextstreamid += 2;
         stream.registerStream(streamid);

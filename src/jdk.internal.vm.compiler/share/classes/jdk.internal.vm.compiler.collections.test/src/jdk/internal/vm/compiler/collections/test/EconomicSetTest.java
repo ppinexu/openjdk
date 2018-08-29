@@ -20,6 +20,8 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
+
 package jdk.internal.vm.compiler.collections.test;
 
 import java.util.ArrayList;
@@ -140,7 +142,12 @@ public class EconomicSetTest {
         }
         Assert.assertEquals(initialList, removalList);
         Assert.assertEquals(1, finalList.size());
-        Assert.assertEquals(new Integer(9), finalList.get(0));
+        Assert.assertEquals(newInteger(9), finalList.get(0));
+    }
+
+    @SuppressWarnings("deprecation")
+    private static Integer newInteger(int value) {
+        return new Integer(value);
     }
 
 }

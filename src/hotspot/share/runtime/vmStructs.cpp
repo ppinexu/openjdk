@@ -162,12 +162,8 @@
 
 typedef HashtableEntry<intptr_t, mtInternal>  IntptrHashtableEntry;
 typedef Hashtable<intptr_t, mtInternal>       IntptrHashtable;
-typedef Hashtable<Symbol*, mtSymbol>          SymbolHashtable;
-typedef HashtableEntry<Symbol*, mtClass>      SymbolHashtableEntry;
 typedef Hashtable<InstanceKlass*, mtClass>       KlassHashtable;
 typedef HashtableEntry<InstanceKlass*, mtClass>  KlassHashtableEntry;
-typedef CompactHashtable<Symbol*, char>       SymbolCompactHashTable;
-typedef RehashableHashtable<Symbol*, mtSymbol>   RehashableSymbolHashtable;
 
 typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
 
@@ -225,8 +221,8 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   volatile_nonstatic_field(InstanceKlass,      _array_klasses,                                Klass*)                                \
   nonstatic_field(InstanceKlass,               _methods,                                      Array<Method*>*)                       \
   nonstatic_field(InstanceKlass,               _default_methods,                              Array<Method*>*)                       \
-  nonstatic_field(InstanceKlass,               _local_interfaces,                             Array<Klass*>*)                        \
-  nonstatic_field(InstanceKlass,               _transitive_interfaces,                        Array<Klass*>*)                        \
+  nonstatic_field(InstanceKlass,               _local_interfaces,                             Array<InstanceKlass*>*)                \
+  nonstatic_field(InstanceKlass,               _transitive_interfaces,                        Array<InstanceKlass*>*)                \
   nonstatic_field(InstanceKlass,               _fields,                                       Array<u2>*)                            \
   nonstatic_field(InstanceKlass,               _java_fields_count,                            u2)                                    \
   nonstatic_field(InstanceKlass,               _constants,                                    ConstantPool*)                         \
@@ -330,9 +326,8 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   nonstatic_field(ConstMethod,                 _size_of_parameters,                           u2)                                    \
   nonstatic_field(ObjArrayKlass,               _element_klass,                                Klass*)                                \
   nonstatic_field(ObjArrayKlass,               _bottom_klass,                                 Klass*)                                \
-  volatile_nonstatic_field(Symbol,             _refcount,                                     short)                                 \
+  volatile_nonstatic_field(Symbol,             _length_and_refcount,                          unsigned int)                          \
   nonstatic_field(Symbol,                      _identity_hash,                                short)                                 \
-  nonstatic_field(Symbol,                      _length,                                       unsigned short)                        \
   unchecked_nonstatic_field(Symbol,            _body,                                         sizeof(jbyte)) /* NOTE: no type */     \
   nonstatic_field(Symbol,                      _body[0],                                      jbyte)                                 \
   nonstatic_field(TypeArrayKlass,              _max_length,                                   jint)                                  \
@@ -468,24 +463,6 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
      static_field(PerfMemory,                  _prologue,                                     PerfDataPrologue*)                     \
      static_field(PerfMemory,                  _initialized,                                  int)                                   \
                                                                                                                                      \
-  /***************/                                                                                                                  \
-  /* SymbolTable */                                                                                                                  \
-  /***************/                                                                                                                  \
-                                                                                                                                     \
-     static_field(SymbolTable,                 _the_table,                                    SymbolTable*)                          \
-     static_field(SymbolTable,                 _shared_table,                                 SymbolCompactHashTable)                \
-     static_field(RehashableSymbolHashtable,   _seed,                                         juint)                                 \
-                                                                                                                                     \
-  /********************/                                                                                                             \
-  /* CompactHashTable */                                                                                                             \
-  /********************/                                                                                                             \
-                                                                                                                                     \
-  nonstatic_field(SymbolCompactHashTable,      _base_address,                                 address)                               \
-  nonstatic_field(SymbolCompactHashTable,      _entry_count,                                  u4)                                    \
-  nonstatic_field(SymbolCompactHashTable,      _bucket_count,                                 u4)                                    \
-  nonstatic_field(SymbolCompactHashTable,      _buckets,                                      u4*)                                   \
-  nonstatic_field(SymbolCompactHashTable,      _entries,                                      u4*)                                   \
-                                                                                                                                     \
   /********************/                                                                                                             \
   /* SystemDictionary */                                                                                                             \
   /********************/                                                                                                             \
@@ -539,7 +516,7 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   nonstatic_field(ClassLoaderData,             _class_loader,                                 OopHandle)                             \
   nonstatic_field(ClassLoaderData,             _next,                                         ClassLoaderData*)                      \
   volatile_nonstatic_field(ClassLoaderData,    _klasses,                                      Klass*)                                \
-  nonstatic_field(ClassLoaderData,             _is_anonymous,                                 bool)                                  \
+  nonstatic_field(ClassLoaderData,             _is_unsafe_anonymous,                          bool)                                  \
   volatile_nonstatic_field(ClassLoaderData,    _dictionary,                                   Dictionary*)                           \
                                                                                                                                      \
      static_field(ClassLoaderDataGraph,        _head,                                         ClassLoaderData*)                      \
@@ -611,6 +588,7 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
      static_field(StubRoutines,                _cipherBlockChaining_decryptAESCrypt,          address)                               \
      static_field(StubRoutines,                _counterMode_AESCrypt,                         address)                               \
      static_field(StubRoutines,                _ghash_processBlocks,                          address)                               \
+     static_field(StubRoutines,                _base64_encodeBlock,                           address)                               \
      static_field(StubRoutines,                _updateBytesCRC32,                             address)                               \
      static_field(StubRoutines,                _crc_table_adr,                                address)                               \
      static_field(StubRoutines,                _crc32c_table_addr,                            address)                               \
@@ -1117,11 +1095,11 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   /* FileMapInfo fields (CDS archive related) */                                                                                     \
   /********************************************/                                                                                     \
                                                                                                                                      \
-  CDS_ONLY(nonstatic_field(FileMapInfo,                            _header,                   FileMapInfo::FileMapHeader*))          \
-  CDS_ONLY(   static_field(FileMapInfo,                            _current_info,             FileMapInfo*))                         \
-  CDS_ONLY(nonstatic_field(FileMapInfo::FileMapHeader,             _space[0],                 FileMapInfo::FileMapHeader::space_info))\
-  CDS_ONLY(nonstatic_field(FileMapInfo::FileMapHeader::space_info, _addr._base,               char*))                                \
-  CDS_ONLY(nonstatic_field(FileMapInfo::FileMapHeader::space_info, _used,                     size_t))                               \
+  CDS_ONLY(nonstatic_field(FileMapInfo,        _header,                   FileMapHeader*))                                           \
+  CDS_ONLY(   static_field(FileMapInfo,        _current_info,             FileMapInfo*))                                             \
+  CDS_ONLY(nonstatic_field(FileMapHeader,      _space[0],                 CDSFileMapRegion))                                         \
+  CDS_ONLY(nonstatic_field(CDSFileMapRegion,   _addr._base,               char*))                                                    \
+  CDS_ONLY(nonstatic_field(CDSFileMapRegion,   _used,                     size_t))                                                   \
                                                                                                                                      \
   /******************/                                                                                                               \
   /* VMError fields */                                                                                                               \
@@ -1351,15 +1329,13 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   declare_toplevel_type(PerfMemory)                                       \
   declare_type(PerfData, CHeapObj<mtInternal>)                            \
                                                                           \
-  /*********************************/                                     \
-  /* SymbolTable, SystemDictionary */                                     \
-  /*********************************/                                     \
+  /********************/                                                  \
+  /* SystemDictionary */                                                  \
+  /********************/                                                  \
                                                                           \
   declare_toplevel_type(BasicHashtable<mtInternal>)                       \
     declare_type(IntptrHashtable, BasicHashtable<mtInternal>)             \
   declare_toplevel_type(BasicHashtable<mtSymbol>)                         \
-    declare_type(RehashableSymbolHashtable, BasicHashtable<mtSymbol>)     \
-  declare_type(SymbolTable, SymbolHashtable)                              \
     declare_type(Dictionary, KlassHashtable)                              \
   declare_toplevel_type(BasicHashtableEntry<mtInternal>)                  \
   declare_type(IntptrHashtableEntry, BasicHashtableEntry<mtInternal>)     \
@@ -1372,8 +1348,6 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   declare_toplevel_type(GrowableArray<int>)                               \
   declare_toplevel_type(Arena)                                            \
     declare_type(ResourceArea, Arena)                                     \
-                                                                          \
-  declare_toplevel_type(SymbolCompactHashTable)                           \
                                                                           \
   /***********************************************************/           \
   /* Thread hierarchy (needed for run-time type information) */           \
@@ -2004,9 +1978,8 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   declare_toplevel_type(Annotations*)                                     \
   declare_type(OopMapValue, StackObj)                                     \
   declare_type(FileMapInfo, CHeapObj<mtInternal>)                         \
-  declare_type(FileMapInfo::FileMapHeaderBase, CHeapObj<mtClass>)         \
-  declare_type(FileMapInfo::FileMapHeader, FileMapInfo::FileMapHeaderBase)\
-  declare_toplevel_type(FileMapInfo::FileMapHeader::space_info)           \
+  declare_toplevel_type(FileMapHeader)                                    \
+  declare_toplevel_type(CDSFileMapRegion)                                 \
                                                                           \
   /************/                                                          \
   /* GC types */                                                          \
@@ -2293,7 +2266,7 @@ typedef PaddedEnd<ObjectMonitor>              PaddedObjectMonitor;
   declare_constant(InstanceKlass::_misc_rewritten)                        \
   declare_constant(InstanceKlass::_misc_has_nonstatic_fields)             \
   declare_constant(InstanceKlass::_misc_should_verify_class)              \
-  declare_constant(InstanceKlass::_misc_is_anonymous)                     \
+  declare_constant(InstanceKlass::_misc_is_unsafe_anonymous)              \
   declare_constant(InstanceKlass::_misc_is_contended)                     \
   declare_constant(InstanceKlass::_misc_has_nonstatic_concrete_methods)   \
   declare_constant(InstanceKlass::_misc_declares_nonstatic_concrete_methods)\

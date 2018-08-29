@@ -148,9 +148,8 @@ void JfrTypeManager::write_safepoint_types(JfrCheckpointWriter& writer) {
 }
 
 void JfrTypeManager::write_type_set() {
-  assert(!SafepointSynchronize::is_at_safepoint(), "invariant");
   // can safepoint here because of Module_lock
-  MutexLockerEx lock(Module_lock);
+  MutexLockerEx lock(SafepointSynchronize::is_at_safepoint() ? NULL : Module_lock);
   JfrCheckpointWriter writer(true, true, Thread::current());
   TypeSet set;
   set.serialize(writer);
@@ -236,8 +235,6 @@ bool JfrTypeManager::initialize() {
   register_type(TYPE_CODEBLOBTYPE, false, true, new CodeBlobTypeConstant());
   register_type(TYPE_VMOPERATIONTYPE, false, true, new VMOperationTypeConstant());
   register_type(TYPE_THREADSTATE, false, true, new ThreadStateConstant());
-  register_type(TYPE_ZSTATISTICSCOUNTERTYPE, false, true, new ZStatisticsCounterTypeConstant());
-  register_type(TYPE_ZSTATISTICSSAMPLERTYPE, false, true, new ZStatisticsSamplerTypeConstant());
 
   // register safepointing type serialization
   register_type(TYPE_THREADGROUP, true, false, new JfrThreadGroupConstant());

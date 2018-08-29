@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -549,9 +549,10 @@ class Invariance : public StackObj {
 
  public:
   Invariance(Arena* area, IdealLoopTree* lpt) :
-    _lpt(lpt), _phase(lpt->_phase),
-    _visited(area), _invariant(area), _stack(area, 10 /* guess */),
-    _clone_visited(area), _old_new(area)
+    _visited(area), _invariant(area),
+    _stack(area, 10 /* guess */),
+    _clone_visited(area), _old_new(area),
+    _lpt(lpt), _phase(lpt->_phase)
   {
     LoopNode* head = _lpt->_head->as_Loop();
     Node* entry = head->skip_strip_mined()->in(LoopNode::EntryControl);
@@ -684,6 +685,7 @@ BoolNode* PhaseIdealLoop::rc_predicate(IdealLoopTree *loop, Node* ctrl,
   Node* max_idx_expr = NULL;
   const TypeInt* idx_type = TypeInt::INT;
   if ((stride > 0) == (scale > 0) == upper) {
+    guarantee(limit != NULL, "sanity");
     if (TraceLoopPredicate) {
       if (limit->is_Con()) {
         predString->print("(%d ", con_limit);
@@ -1056,7 +1058,9 @@ void PhaseIdealLoop::loop_predication_follow_branches(Node *n, IdealLoopTree *lo
           stack.push(in, 1);
           break;
         } else if (in->is_IfProj() &&
-                   in->as_Proj()->is_uncommon_trap_if_pattern(Deoptimization::Reason_none)) {
+                   in->as_Proj()->is_uncommon_trap_if_pattern(Deoptimization::Reason_none) &&
+                   (in->in(0)->Opcode() == Op_If ||
+                    in->in(0)->Opcode() == Op_RangeCheck)) {
           if (pf.to(in) * loop_trip_cnt >= 1) {
             stack.push(in, 1);
           }
@@ -1281,7 +1285,7 @@ bool PhaseIdealLoop::loop_predication_impl(IdealLoopTree *loop) {
     Node* n = skip_loop_predicates(entry);
     // Check if predicates were already added to the profile predicate
     // block
-    if (n != entry->in(0)->in(0)) {
+    if (n != entry->in(0)->in(0) || n->outcnt() != 1) {
       has_profile_predicates = true;
     }
     entry = n;

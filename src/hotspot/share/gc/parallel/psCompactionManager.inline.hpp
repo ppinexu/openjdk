@@ -37,16 +37,16 @@
 #include "utilities/debug.hpp"
 #include "utilities/globalDefinitions.hpp"
 
-inline bool ParCompactionManager::steal(int queue_num, int* seed, oop& t) {
-  return stack_array()->steal(queue_num, seed, t);
+inline bool ParCompactionManager::steal(int queue_num, oop& t) {
+  return stack_array()->steal(queue_num, t);
 }
 
-inline bool ParCompactionManager::steal_objarray(int queue_num, int* seed, ObjArrayTask& t) {
-  return _objarray_queues->steal(queue_num, seed, t);
+inline bool ParCompactionManager::steal_objarray(int queue_num, ObjArrayTask& t) {
+  return _objarray_queues->steal(queue_num, t);
 }
 
-inline bool ParCompactionManager::steal(int queue_num, int* seed, size_t& region) {
-  return region_array()->steal(queue_num, seed, region);
+inline bool ParCompactionManager::steal(int queue_num, size_t& region) {
+  return region_array()->steal(queue_num, region);
 }
 
 inline void ParCompactionManager::push(oop obj) {
@@ -85,12 +85,12 @@ inline void ParCompactionManager::mark_and_push(T* p) {
 }
 
 template <typename T>
-inline void ParCompactionManager::MarkAndPushClosure::do_oop_nv(T* p) {
+inline void ParCompactionManager::MarkAndPushClosure::do_oop_work(T* p) {
   _compaction_manager->mark_and_push(p);
 }
 
-inline void ParCompactionManager::MarkAndPushClosure::do_oop(oop* p)       { do_oop_nv(p); }
-inline void ParCompactionManager::MarkAndPushClosure::do_oop(narrowOop* p) { do_oop_nv(p); }
+inline void ParCompactionManager::MarkAndPushClosure::do_oop(oop* p)       { do_oop_work(p); }
+inline void ParCompactionManager::MarkAndPushClosure::do_oop(narrowOop* p) { do_oop_work(p); }
 
 inline void ParCompactionManager::follow_klass(Klass* klass) {
   oop holder = klass->klass_holder();

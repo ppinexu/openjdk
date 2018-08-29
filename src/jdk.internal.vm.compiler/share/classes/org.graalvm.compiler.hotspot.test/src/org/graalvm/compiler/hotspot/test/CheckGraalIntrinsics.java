@@ -20,6 +20,8 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+
+
 package org.graalvm.compiler.hotspot.test;
 
 import java.lang.reflect.Method;
@@ -49,6 +51,7 @@ import org.graalvm.compiler.serviceprovider.GraalServices;
 import org.graalvm.compiler.test.GraalTest;
 import org.junit.Test;
 
+import jdk.vm.ci.aarch64.AArch64;
 import jdk.vm.ci.amd64.AMD64;
 import jdk.vm.ci.code.Architecture;
 import jdk.vm.ci.hotspot.HotSpotVMConfigStore;
@@ -340,14 +343,11 @@ public class CheckGraalIntrinsics extends GraalTest {
             add(toBeInvestigated,
                             "java/lang/StringCoding.hasNegatives([BII)Z",
                             "java/lang/StringCoding.implEncodeISOArray([BI[BII)I",
-                            "java/lang/StringLatin1.equals([B[B)Z",
-                            "java/lang/StringLatin1.indexOf([BI[BII)I",
                             "java/lang/StringLatin1.indexOf([B[B)I",
                             "java/lang/StringLatin1.inflate([BI[BII)V",
                             "java/lang/StringLatin1.inflate([BI[CII)V",
                             "java/lang/StringUTF16.compress([BI[BII)I",
                             "java/lang/StringUTF16.compress([CI[BII)I",
-                            "java/lang/StringUTF16.equals([B[B)Z",
                             "java/lang/StringUTF16.getChar([BI)C",
                             "java/lang/StringUTF16.getChars([BII[CI)V",
                             "java/lang/StringUTF16.indexOf([BI[BII)I",
@@ -357,6 +357,10 @@ public class CheckGraalIntrinsics extends GraalTest {
                             "java/lang/StringUTF16.indexOfLatin1([B[B)I",
                             "java/lang/StringUTF16.putChar([BII)V",
                             "java/lang/StringUTF16.toBytes([CII)[B");
+            // These are handled through an intrinsic for String.equals itself
+            add(ignore,
+                            "java/lang/StringLatin1.equals([B[B)Z",
+                            "java/lang/StringUTF16.equals([B[B)Z");
         }
 
         if (isJDK10OrHigher()) {
@@ -368,6 +372,7 @@ public class CheckGraalIntrinsics extends GraalTest {
         if (isJDK11OrHigher()) {
             // Relevant for Java flight recorder
             add(toBeInvestigated,
+                            "java/util/Base64$Encoder.encodeBlock([BII[BIZ)V",
                             "jdk/jfr/internal/JVM.getEventWriter()Ljava/lang/Object;");
         }
 
@@ -397,16 +402,19 @@ public class CheckGraalIntrinsics extends GraalTest {
                             "sun/misc/Unsafe.getAndSetObject(Ljava/lang/Object;JLjava/lang/Object;)Ljava/lang/Object;");
 
             if (isJDK9OrHigher()) {
+                if (!(arch instanceof AArch64)) {
+                    add(toBeInvestigated,
+                                    "java/lang/StringLatin1.compareTo([B[B)I",
+                                    "java/lang/StringLatin1.compareToUTF16([B[B)I",
+                                    "java/lang/StringUTF16.compareTo([B[B)I",
+                                    "java/lang/StringUTF16.compareToLatin1([B[B)I",
+                                    "jdk/internal/misc/Unsafe.getAndAddInt(Ljava/lang/Object;JI)I",
+                                    "jdk/internal/misc/Unsafe.getAndAddLong(Ljava/lang/Object;JJ)J",
+                                    "jdk/internal/misc/Unsafe.getAndSetInt(Ljava/lang/Object;JI)I",
+                                    "jdk/internal/misc/Unsafe.getAndSetLong(Ljava/lang/Object;JJ)J",
+                                    "jdk/internal/misc/Unsafe.getAndSetObject(Ljava/lang/Object;JLjava/lang/Object;)Ljava/lang/Object;");
+                }
                 add(toBeInvestigated,
-                                "java/lang/StringLatin1.compareTo([B[B)I",
-                                "java/lang/StringLatin1.compareToUTF16([B[B)I",
-                                "java/lang/StringUTF16.compareTo([B[B)I",
-                                "java/lang/StringUTF16.compareToLatin1([B[B)I",
-                                "jdk/internal/misc/Unsafe.getAndAddInt(Ljava/lang/Object;JI)I",
-                                "jdk/internal/misc/Unsafe.getAndAddLong(Ljava/lang/Object;JJ)J",
-                                "jdk/internal/misc/Unsafe.getAndSetInt(Ljava/lang/Object;JI)I",
-                                "jdk/internal/misc/Unsafe.getAndSetLong(Ljava/lang/Object;JJ)J",
-                                "jdk/internal/misc/Unsafe.getAndSetObject(Ljava/lang/Object;JLjava/lang/Object;)Ljava/lang/Object;",
                                 "jdk/internal/misc/Unsafe.getCharUnaligned(Ljava/lang/Object;J)C",
                                 "jdk/internal/misc/Unsafe.getIntUnaligned(Ljava/lang/Object;J)I",
                                 "jdk/internal/misc/Unsafe.getLongUnaligned(Ljava/lang/Object;J)J",

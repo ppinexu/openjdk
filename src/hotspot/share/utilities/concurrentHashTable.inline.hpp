@@ -263,8 +263,11 @@ inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
       Prefetch::read(*pref->value(), 0);
       pref = pref->next();
     }
-    if (next->next() != NULL) {
-      Prefetch::read(*next->next()->value(), 0);
+    // Read next() Node* once.  May be racing with a thread moving the next
+    // pointers.
+    Node* next_pref = next->next();
+    if (next_pref != NULL) {
+      Prefetch::read(*next_pref->value(), 0);
     }
     if (eval_f(next->value())) {
       return true;
@@ -537,6 +540,8 @@ template <typename LOOKUP_FUNC>
 inline void ConcurrentHashTable<VALUE, CONFIG, F>::
   delete_in_bucket(Thread* thread, Bucket* bucket, LOOKUP_FUNC& lookup_f)
 {
+  assert(bucket->is_locked(), "Must be locked.");
+
   size_t dels = 0;
   Node* ndel[BULK_DELETE_LIMIT];
   Node* const volatile * rem_n_prev = bucket->first_ptr();
@@ -546,8 +551,9 @@ inline void ConcurrentHashTable<VALUE, CONFIG, F>::
     lookup_f.equals(rem_n->value(), &is_dead);
     if (is_dead) {
       ndel[dels++] = rem_n;
-      bucket->release_assign_node_ptr(rem_n_prev, rem_n->next());
-      rem_n = rem_n->next();
+      Node* next_node = rem_n->next();
+      bucket->release_assign_node_ptr(rem_n_prev, next_node);
+      rem_n = next_node;
       if (dels == BULK_DELETE_LIMIT) {
         break;
       }
@@ -654,32 +660,33 @@ inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
   while (aux != NULL) {
     bool dead_hash = false;
     size_t aux_hash = CONFIG::get_hash(*aux->value(), &dead_hash);
+    Node* aux_next = aux->next();
     if (dead_hash) {
       delete_me = aux;
       // This item is dead, move both list to next
       new_table->get_bucket(odd_index)->release_assign_node_ptr(odd,
-                                                                aux->next());
+                                                                aux_next);
       new_table->get_bucket(even_index)->release_assign_node_ptr(even,
-                                                                 aux->next());
+                                                                 aux_next);
     } else {
       size_t aux_index = bucket_idx_hash(new_table, aux_hash);
       if (aux_index == even_index) {
         // This is a even, so move odd to aux/even next
         new_table->get_bucket(odd_index)->release_assign_node_ptr(odd,
-                                                                  aux->next());
+                                                                  aux_next);
         // Keep in even list
         even = aux->next_ptr();
       } else if (aux_index == odd_index) {
         // This is a odd, so move odd to aux/odd next
         new_table->get_bucket(even_index)->release_assign_node_ptr(even,
-                                                                   aux->next());
+                                                                   aux_next);
         // Keep in odd list
         odd = aux->next_ptr();
       } else {
         fatal("aux_index does not match even or odd indices");
       }
     }
-    aux = aux->next();
+    aux = aux_next;
 
     // We can only move 1 pointer otherwise a reader might be moved to the wrong
     // chain. E.g. looking for even hash value but got moved to the odd bucket
@@ -869,7 +876,7 @@ template <typename VALUE, typename CONFIG, MEMFLAGS F>
 template <typename LOOKUP_FUNC, typename VALUE_FUNC, typename CALLBACK_FUNC>
 inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
   internal_insert(Thread* thread, LOOKUP_FUNC& lookup_f, VALUE_FUNC& value_f,
-                  CALLBACK_FUNC& callback, bool* grow_hint)
+                  CALLBACK_FUNC& callback, bool* grow_hint, bool* clean_hint)
 {
   bool ret = false;
   bool clean = false;
@@ -920,13 +927,18 @@ inline bool ConcurrentHashTable<VALUE, CONFIG, F>::
   } else if (i == 0 && clean) {
     // We only do cleaning on fast inserts.
     Bucket* bucket = get_bucket_locked(thread, lookup_f.get_hash());
-    assert(bucket->is_locked(), "Must be locked.");
     delete_in_bucket(thread, bucket, lookup_f);
     bucket->unlock();
+
+    clean = false;
   }
 
   if (grow_hint != NULL) {
     *grow_hint = loops > _grow_hint;
+  }
+
+  if (clean_hint != NULL) {
+    *clean_hint = clean;
   }
 
   return ret;
@@ -976,8 +988,9 @@ inline size_t ConcurrentHashTable<VALUE, CONFIG, F>::
   while (rem_n != NULL) {
     if (eval_f(rem_n->value())) {
       ndel[dels++] = rem_n;
-      bucket->release_assign_node_ptr(rem_n_prev, rem_n->next());
-      rem_n = rem_n->next();
+      Node* next_node = rem_n->next();
+      bucket->release_assign_node_ptr(rem_n_prev, next_node);
+      rem_n = next_node;
       if (dels == num_del) {
         break;
       }
@@ -993,8 +1006,8 @@ inline size_t ConcurrentHashTable<VALUE, CONFIG, F>::
 template <typename VALUE, typename CONFIG, MEMFLAGS F>
 inline ConcurrentHashTable<VALUE, CONFIG, F>::
   ConcurrentHashTable(size_t log2size, size_t log2size_limit, size_t grow_hint)
-    : _new_table(NULL), _log2_start_size(log2size),
-       _log2_size_limit(log2size_limit), _grow_hint(grow_hint),
+    : _new_table(NULL), _log2_size_limit(log2size_limit),
+       _log2_start_size(log2size), _grow_hint(grow_hint),
        _size_limit_reached(false), _resize_lock_owner(NULL),
        _invisible_epoch(0)
 {

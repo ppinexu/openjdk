@@ -234,8 +234,10 @@ int AOTOopRecorder::find_index(Metadata* h) {
 
   vmassert(index + 1 == newCount, "must be last");
 
-  Klass* klass = NULL;
+  JVMCIKlassHandle klass(THREAD);
   oop result = NULL;
+  guarantee(h != NULL,
+            "If DebugInformationRecorder::describe_scope passes NULL oldCount == newCount must hold.");
   if (h->is_klass()) {
     klass = (Klass*) h;
     result = CompilerToVM::get_jvmci_type(klass, CATCH);
@@ -966,8 +968,8 @@ void CodeInstaller::assumption_ConcreteMethod(Thread* thread, Handle assumption)
 }
 
 void CodeInstaller::assumption_CallSiteTargetValue(Thread* thread, Handle assumption) {
-  Handle callSite(thread, Assumptions_CallSiteTargetValue::callSite(assumption()));
-  Handle methodHandle(thread, Assumptions_CallSiteTargetValue::methodHandle(assumption()));
+  Handle callSite(thread, HotSpotObjectConstantImpl::object(Assumptions_CallSiteTargetValue::callSite(assumption())));
+  Handle methodHandle(thread, HotSpotObjectConstantImpl::object(Assumptions_CallSiteTargetValue::methodHandle(assumption())));
 
   _dependencies->assert_call_site_target_value(callSite(), methodHandle());
 }

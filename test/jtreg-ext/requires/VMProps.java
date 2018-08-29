@@ -73,6 +73,15 @@ public class VMProps implements Callable<Map<String, String>> {
         map.put("vm.debug", vmDebug());
         map.put("vm.jvmci", vmJvmci());
         map.put("vm.emulatedClient", vmEmulatedClient());
+        // vm.hasSA is "true" if the VM contains the serviceability agent
+        // and jhsdb.
+        map.put("vm.hasSA", vmHasSA());
+        // vm.hasSAandCanAttach is "true" if the VM contains the serviceability agent
+        // and jhsdb and it can attach to the VM.
+        map.put("vm.hasSAandCanAttach", vmHasSAandCanAttach());
+        // vm.hasJFR is "true" if JFR is included in the build of the VM and
+        // so tests can be executed.
+        map.put("vm.hasJFR", vmHasJFR());
         map.put("vm.cpu.features", cpuFeatures());
         map.put("vm.rtm.cpu", vmRTMCPU());
         map.put("vm.rtm.os", vmRTMOS());
@@ -83,6 +92,8 @@ public class VMProps implements Callable<Map<String, String>> {
         map.put("vm.cds.archived.java.heap", vmCDSForArchivedJavaHeap());
         // vm.graal.enabled is true if Graal is used as JIT
         map.put("vm.graal.enabled", isGraalEnabled());
+        map.put("vm.compiler1.enabled", isCompiler1Enabled());
+        map.put("vm.compiler2.enabled", isCompiler2Enabled());
         map.put("docker.support", dockerSupport());
         map.put("release.implementor", implementor());
         vmGC(map); // vm.gc.X = true/false
@@ -245,17 +256,48 @@ public class VMProps implements Callable<Map<String, String>> {
      * @param flagName - flag name
      */
     private void vmOptFinalFlag(Map<String, String> map, String flagName) {
-        String value = WB.getBooleanVMFlag(flagName) ? "true" : "false";
+        String value = String.valueOf(WB.getBooleanVMFlag(flagName));
         map.put("vm.opt.final." + flagName, value);
     }
 
     /**
      * Selected sets of final flags.
-     * @param map -property-value pairs
+     * @param map - property-value pairs
      */
     protected void vmOptFinalFlags(Map<String, String> map) {
         vmOptFinalFlag(map, "ClassUnloading");
         vmOptFinalFlag(map, "UseCompressedOops");
+        vmOptFinalFlag(map, "EnableJVMCI");
+    }
+
+    /**
+     * @return "true" if VM has a serviceability agent.
+     */
+    protected String vmHasSA() {
+        return "" + Platform.hasSA();
+    }
+
+    /**
+     * @return "true" if VM has a serviceability agent and it can
+     * attach to the VM.
+     */
+    protected String vmHasSAandCanAttach() {
+        try {
+            return "" + Platform.shouldSAAttach();
+        } catch (IOException e) {
+            System.out.println("Checking whether SA can attach to the VM failed.");
+            e.printStackTrace();
+            // Run the tests anyways.
+            return "true";
+        }
+    }
+
+    /**
+     * @return "true" if the VM is compiled with Java Flight Recorder (JFR)
+     * support.
+     */
+    protected String vmHasJFR() {
+        return "" + WB.isJFRIncludedInVmBuild();
     }
 
     /**
@@ -350,6 +392,23 @@ public class VMProps implements Callable<Map<String, String>> {
         return Compiler.isGraalEnabled() ? "true" : "false";
     }
 
+    /**
+     * Check if Compiler1 is present.
+     *
+     * @return true if Compiler1 is used as JIT compiler, either alone or as part of the tiered system.
+     */
+    protected String isCompiler1Enabled() {
+        return Compiler.isC1Enabled() ? "true" : "false";
+    }
+
+    /**
+     * Check if Compiler2 is present.
+     *
+     * @return true if Compiler2 is used as JIT compiler, either alone or as part of the tiered system.
+     */
+    protected String isCompiler2Enabled() {
+        return Compiler.isC2Enabled() ? "true" : "false";
+    }
 
    /**
      * A simple check for docker support
@@ -403,7 +462,8 @@ public class VMProps implements Callable<Map<String, String>> {
                 System.getProperty("java.home") + "/release"))) {
             Properties properties = new Properties();
             properties.load(in);
-            return properties.getProperty("IMPLEMENTOR").replace("\"", "");
+            String implementorProperty = properties.getProperty("IMPLEMENTOR");
+            return (implementorProperty == null) ? "null" : implementorProperty.replace("\"", "");
         } catch (IOException e) {
             e.printStackTrace();
         }

@@ -387,7 +387,8 @@ ModuleEntry* ModuleEntryTable::new_entry(unsigned int hash, Handle module_handle
     entry->set_is_patched();
     if (log_is_enabled(Trace, module, patch)) {
       ResourceMark rm;
-      log_trace(module, patch)("Marked module %s as patched from --patch-module", name->as_C_string());
+      log_trace(module, patch)("Marked module %s as patched from --patch-module",
+                               name != NULL ? name->as_C_string() : UNNAMED_MODULE);
     }
   }
 
@@ -435,7 +436,7 @@ ModuleEntry* ModuleEntryTable::lookup_only(Symbol* name) {
 // Remove dead modules from all other alive modules' reads list.
 // This should only occur at class unloading.
 void ModuleEntryTable::purge_all_module_reads() {
-  assert(SafepointSynchronize::is_at_safepoint(), "must be at safepoint");
+  assert_locked_or_safepoint(Module_lock);
   for (int i = 0; i < table_size(); i++) {
     for (ModuleEntry* entry = bucket(i);
                       entry != NULL;

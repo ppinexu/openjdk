@@ -48,7 +48,7 @@
 #include "prims/methodHandles.hpp"
 #include "prims/nativeLookup.hpp"
 #include "runtime/compilationPolicy.hpp"
-#include "runtime/fieldDescriptor.hpp"
+#include "runtime/fieldDescriptor.inline.hpp"
 #include "runtime/frame.inline.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/reflection.hpp"
@@ -218,7 +218,7 @@ void CallInfo::verify() {
     fatal("Unexpected call kind %d", call_kind());
   }
 }
-#endif //ASSERT
+#endif // ASSERT
 
 #ifndef PRODUCT
 void CallInfo::print() {
@@ -294,7 +294,7 @@ void LinkResolver::check_klass_accessability(Klass* ref_klass, Klass* sel_klass,
       base_klass = ObjArrayKlass::cast(sel_klass)->bottom_klass();
     }
     // The element type could be a typeArray - we only need the access
-    // check if it is an reference to another class.
+    // check if it is a reference to another class.
     if (!base_klass->is_instance_klass()) {
       return;  // no relevant check to do
     }
@@ -306,13 +306,17 @@ void LinkResolver::check_klass_accessability(Klass* ref_klass, Klass* sel_klass,
     char* msg = Reflection::verify_class_access_msg(ref_klass,
                                                     InstanceKlass::cast(base_klass),
                                                     vca_result);
+    bool same_module = (base_klass->module() == ref_klass->module());
     if (msg == NULL) {
       Exceptions::fthrow(
         THREAD_AND_LOCATION,
         vmSymbols::java_lang_IllegalAccessError(),
-        "failed to access class %s from class %s",
+        "failed to access class %s from class %s (%s%s%s)",
         base_klass->external_name(),
-        ref_klass->external_name());
+        ref_klass->external_name(),
+        (same_module) ? base_klass->joint_in_module_of_loader(ref_klass) : base_klass->class_in_module_of_loader(),
+        (same_module) ? "" : "; ",
+        (same_module) ? "" : ref_klass->class_in_module_of_loader());
     } else {
       // Use module specific message returned by verify_class_access_msg().
       Exceptions::fthrow(
@@ -592,14 +596,21 @@ void LinkResolver::check_method_accessability(Klass* ref_klass,
   // from nest-host resolution, have been allowed to propagate.
   if (!can_access) {
     ResourceMark rm(THREAD);
+    bool same_module = (sel_klass->module() == ref_klass->module());
     Exceptions::fthrow(
       THREAD_AND_LOCATION,
       vmSymbols::java_lang_IllegalAccessError(),
-      "tried to access method %s.%s%s from class %s",
+      "class %s tried to access %s%s%smethod %s.%s%s (%s%s%s)",
+      ref_klass->external_name(),
+      sel_method->is_abstract()  ? "abstract "  : "",
+      sel_method->is_protected() ? "protected " : "",
+      sel_method->is_private()   ? "private "   : "",
       sel_klass->external_name(),
       sel_method->name()->as_C_string(),
       sel_method->signature()->as_C_string(),
-      ref_klass->external_name()
+      (same_module) ? ref_klass->joint_in_module_of_loader(sel_klass) : ref_klass->class_in_module_of_loader(),
+      (same_module) ? "" : "; ",
+      (same_module) ? "" : sel_klass->class_in_module_of_loader()
     );
     return;
   }
@@ -658,23 +669,28 @@ void LinkResolver::check_method_loader_constraints(const LinkInfo& link_info,
     SystemDictionary::check_signature_loaders(link_info.signature(), current_loader,
                                               resolved_loader, true, CHECK);
   if (failed_type_symbol != NULL) {
-    const char* msg = "loader constraint violation: when resolving %s"
-      " \"%s\" the class loader %s of the current class, %s,"
-      " and the class loader %s for the method's defining class, %s, have"
-      " different Class objects for the type %s used in the signature";
-    char* sig = link_info.method_string();
-    const char* loader1_name = java_lang_ClassLoader::describe_external(current_loader());
-    char* current = link_info.current_klass()->name()->as_C_string();
-    const char* loader2_name = java_lang_ClassLoader::describe_external(resolved_loader());
-    char* target = resolved_method->method_holder()->name()->as_C_string();
-    char* failed_type_name = failed_type_symbol->as_C_string();
-    size_t buflen = strlen(msg) + strlen(sig) + strlen(loader1_name) +
-      strlen(current) + strlen(loader2_name) + strlen(target) +
-      strlen(failed_type_name) + strlen(method_type) + 1;
-    char* buf = NEW_RESOURCE_ARRAY_IN_THREAD(THREAD, char, buflen);
-    jio_snprintf(buf, buflen, msg, method_type, sig, loader1_name, current, loader2_name,
-                 target, failed_type_name);
-    THROW_MSG(vmSymbols::java_lang_LinkageError(), buf);
+    Klass* current_class = link_info.current_klass();
+    ClassLoaderData* current_loader_data = current_class->class_loader_data();
+    assert(current_loader_data != NULL, "current class has no class loader data");
+    Klass* resolved_method_class = resolved_method->method_holder();
+    ClassLoaderData* target_loader_data = resolved_method_class->class_loader_data();
+    assert(target_loader_data != NULL, "resolved method's class has no class loader data");
+
+    stringStream ss;
+    ss.print("loader constraint violation: when resolving %s"
+             " \"%s\" the class loader %s of the current class, %s,"
+             " and the class loader %s for the method's defining class, %s, have"
+             " different Class objects for the type %s used in the signature (%s; %s)",
+             method_type,
+             link_info.method_string(),
+             current_loader_data->loader_name_and_id(),
+             current_class->name()->as_C_string(),
+             target_loader_data->loader_name_and_id(),
+             resolved_method_class->name()->as_C_string(),
+             failed_type_symbol->as_C_string(),
+             current_class->class_in_module_of_loader(false, true),
+             resolved_method_class->class_in_module_of_loader(false, true));
+    THROW_MSG(vmSymbols::java_lang_LinkageError(), ss.as_string());
   }
 }
 
@@ -691,23 +707,23 @@ void LinkResolver::check_field_loader_constraints(Symbol* field, Symbol* sig,
                                               false,
                                               CHECK);
   if (failed_type_symbol != NULL) {
-    const char* msg = "loader constraint violation: when resolving field"
-      " \"%s\" of type %s, the class loader %s of the current class, "
-      "%s, and the class loader %s for the field's defining "
-      "type, %s, have different Class objects for type %s";
-    const char* field_name = field->as_C_string();
-    const char* loader1_name = java_lang_ClassLoader::describe_external(ref_loader());
-    const char* sel = sel_klass->external_name();
-    const char* loader2_name = java_lang_ClassLoader::describe_external(sel_loader());
+    stringStream ss;
     const char* failed_type_name = failed_type_symbol->as_klass_external_name();
-    const char* curr_klass_name = current_klass->external_name();
-    size_t buflen = strlen(msg) + strlen(field_name) + 2 * strlen(failed_type_name) +
-                    strlen(loader1_name) + strlen(curr_klass_name) +
-                    strlen(loader2_name) + strlen(sel) + 1;
-    char* buf = NEW_RESOURCE_ARRAY_IN_THREAD(THREAD, char, buflen);
-    jio_snprintf(buf, buflen, msg, field_name, failed_type_name, loader1_name,
-                 curr_klass_name, loader2_name, sel, failed_type_name);
-    THROW_MSG(vmSymbols::java_lang_LinkageError(), buf);
+
+    ss.print("loader constraint violation: when resolving field"
+             " \"%s\" of type %s, the class loader %s of the current class, "
+             "%s, and the class loader %s for the field's defining "
+             "type, %s, have different Class objects for type %s (%s; %s)",
+             field->as_C_string(),
+             failed_type_name,
+             current_klass->class_loader_data()->loader_name_and_id(),
+             current_klass->external_name(),
+             sel_klass->class_loader_data()->loader_name_and_id(),
+             sel_klass->external_name(),
+             failed_type_name,
+             current_klass->class_in_module_of_loader(false, true),
+             sel_klass->class_in_module_of_loader(false, true));
+    THROW_MSG(vmSymbols::java_lang_LinkageError(), ss.as_string());
   }
 }
 
@@ -923,14 +939,20 @@ void LinkResolver::check_field_accessability(Klass* ref_klass,
   // Any existing exceptions that may have been thrown, for example LinkageErrors
   // from nest-host resolution, have been allowed to propagate.
   if (!can_access) {
+    bool same_module = (sel_klass->module() == ref_klass->module());
     ResourceMark rm(THREAD);
     Exceptions::fthrow(
       THREAD_AND_LOCATION,
       vmSymbols::java_lang_IllegalAccessError(),
-      "tried to access field %s.%s from class %s",
+      "class %s tried to access %s%sfield %s.%s (%s%s%s)",
+      ref_klass->external_name(),
+      fd.is_protected() ? "protected " : "",
+      fd.is_private()   ? "private "   : "",
       sel_klass->external_name(),
       fd.name()->as_C_string(),
-      ref_klass->external_name()
+      (same_module) ? ref_klass->joint_in_module_of_loader(sel_klass) : ref_klass->class_in_module_of_loader(),
+      (same_module) ? "" : "; ",
+      (same_module) ? "" : sel_klass->class_in_module_of_loader()
     );
     return;
   }
@@ -1145,9 +1167,9 @@ methodHandle LinkResolver::linktime_resolve_special_method(const LinkInfo& link_
   Klass* current_klass = link_info.current_klass();
   if (current_klass != NULL && resolved_klass->is_interface()) {
     InstanceKlass* ck = InstanceKlass::cast(current_klass);
-    InstanceKlass *klass_to_check = !ck->is_anonymous() ?
+    InstanceKlass *klass_to_check = !ck->is_unsafe_anonymous() ?
                                     ck :
-                                    InstanceKlass::cast(ck->host_klass());
+                                    InstanceKlass::cast(ck->unsafe_anonymous_host());
     // Disable verification for the dynamically-generated reflection bytecodes.
     bool is_reflect = klass_to_check->is_subclass_of(
                         SystemDictionary::reflect_MagicAccessorImpl_klass());
@@ -1204,17 +1226,14 @@ void LinkResolver::runtime_resolve_special_method(CallInfo& result,
       // check if the method is not <init>
       resolved_method->name() != vmSymbols::object_initializer_name()) {
 
-     // check if this is an old-style super call and do a new lookup if so
-     // a) check if ACC_SUPER flag is set for the current class
     Klass* current_klass = link_info.current_klass();
-    if ((current_klass->is_super() || !AllowNonVirtualCalls) &&
-        // b) check if the class of the resolved_klass is a superclass
-        // (not supertype in order to exclude interface classes) of the current class.
-        // This check is not performed for super.invoke for interface methods
-        // in super interfaces.
-        current_klass->is_subclass_of(resolved_klass) &&
-        current_klass != resolved_klass
-        ) {
+
+    // Check if the class of the resolved_klass is a superclass
+    // (not supertype in order to exclude interface classes) of the current class.
+    // This check is not performed for super.invoke for interface methods
+    // in super interfaces.
+    if (current_klass->is_subclass_of(resolved_klass) &&
+        current_klass != resolved_klass) {
       // Lookup super method
       Klass* super_klass = current_klass->super();
       sel_method = lookup_instance_method_in_klasses(super_klass,
@@ -1241,7 +1260,7 @@ void LinkResolver::runtime_resolve_special_method(CallInfo& result,
     // The verifier also checks that the receiver is a subtype of the sender, if the sender is
     // a class.  If the sender is an interface, the check has to be performed at runtime.
     InstanceKlass* sender = InstanceKlass::cast(current_klass);
-    sender = sender->is_anonymous() ? sender->host_klass() : sender;
+    sender = sender->is_unsafe_anonymous() ? sender->unsafe_anonymous_host() : sender;
     if (sender->is_interface() && recv.not_null()) {
       Klass* receiver_klass = recv->klass();
       if (!receiver_klass->is_subtype_of(sender)) {
